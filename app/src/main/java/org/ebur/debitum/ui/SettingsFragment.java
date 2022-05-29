@@ -1,12 +1,16 @@
 package org.ebur.debitum.ui;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.view.View;
 
+import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
@@ -35,8 +39,10 @@ import org.ebur.debitum.viewModel.SettingsViewModel;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -165,7 +171,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         if (backupPref!=null) {
             backupPref.setSummary(getString(R.string.pref_backup_summary, requireContext().getExternalFilesDir(null).getAbsolutePath() + File.separator + BACKUP_SUBDIR));
             backupPref.setOnPreferenceClickListener(preference -> {
-                backup();
+                createBackup();
                 return true;
             });
         }
@@ -238,7 +244,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
     // Backup and restore DB
     // ---------------------
 
-    private void backup() {
+    private void backup(Uri destUri) {
         // assemble filename
         Calendar today = Calendar.getInstance();
         int year = today.get(Calendar.YEAR);
@@ -264,10 +270,10 @@ public class SettingsFragment extends PreferenceFragmentCompat {
             if (imagesDir.listFiles() != null) { filesToZip.addAll(Arrays.asList(imagesDir.listFiles()));}
 
             if (successDb) {
-                info = getString(R.string.backup_successful);
                 try {
                     exportPreferences(prefsFile);
                     FileUtils.zip(filesToZip, zipFile);
+                    info = copyZip(destUri, zipFile);
                 } catch (IOException e) {
                     e.printStackTrace();
                     info = getString(R.string.backup_failed, e.getMessage());
@@ -278,6 +284,31 @@ public class SettingsFragment extends PreferenceFragmentCompat {
             }
             finishBackup(info, dbFile, prefsFile);
         });
+    }
+
+    // copies backup file from original location to one decided via SAF picker
+    private String copyZip(Uri destUri, File originalFile) {
+        String info = getString(R.string.backup_successful);
+        try {
+            ParcelFileDescriptor pfd = getActivity().getContentResolver().openFileDescriptor(destUri, "w");
+            FileOutputStream copyFos = new FileOutputStream(pfd.getFileDescriptor());
+            FileInputStream originalFis = new FileInputStream(originalFile);
+            FileChannel originalChannel = originalFis.getChannel();
+            FileChannel copyChannel = copyFos.getChannel();
+            originalChannel.transferTo(0, originalChannel.size(), copyChannel);
+            copyChannel.close();
+            originalChannel.close();
+            copyFos.close();
+            originalFis.close();
+            pfd.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+            info = getString(R.string.backup_failed, e.getMessage());
+        } catch (IOException e) {
+            e.printStackTrace();
+            info = getString(R.string.backup_failed, e.getMessage());
+        }
+        return info;
     }
 
     // stores the app's preferences as a java properties file
@@ -431,4 +462,26 @@ public class SettingsFragment extends PreferenceFragmentCompat {
                 7000)
                 .show();
     }
+
+    // handle SAF file picker here
+    private void createBackup() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        backupARL.launch(intent);
+    }
+
+    ActivityResultLauncher<Intent> backupARL = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            new ActivityResultCallback<ActivityResult>() {
+                @Override
+                public void onActivityResult(ActivityResult result) {
+                    if (result.getResultCode() == Activity.RESULT_OK) {
+                        Intent data = result.getData();
+                        Uri destUri = data.getData();
+                        backup(destUri);
+                    }
+                }
+            }
+    );
 }
