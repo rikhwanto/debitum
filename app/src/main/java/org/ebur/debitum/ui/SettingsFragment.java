@@ -468,6 +468,7 @@ public class SettingsFragment extends PreferenceFragmentCompat {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE, "debitum-backup.zip");
         backupARL.launch(intent);
     }
 
